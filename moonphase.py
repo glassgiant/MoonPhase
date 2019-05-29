@@ -1,20 +1,25 @@
 '''
 moonphase.py
 Gets real time moon phase data and updates a 6 LED moon model accordingly
-A project by Shawn Wilson and Ryan Wilson, May 2019
+by Shawn Wilson and Ryan Wilson, May 2019
 '''
 
-import json, datetime, time
+import json
+import datetime
+import time
+import RPi.GPIO as GPIO
 from urllib.request import urlopen
+from digitalio import DigitalInOut, Direction
 
 # user-adjustable variables
 errorState = 0b001100 #LED sequence to show if there's an error (an impossible sequence is best)
 errorRetry = datetime.timedelta(seconds=10) #how long to wait before trying to retrieve data after last failed attempt
 errorLimit = 5 #how many times to try fetching data before giving up until updateDataTime or dark/light reset 
 updateDataTime = datetime.timedelta(hours=24) #how often to check for phase change/update LEDs
-darkUpperThres = 0 #upper threshold for darkness
-darkLowerThres = 0 #lower threshold for darkness
+darkUpperThres = 85 #upper threshold for darkness
+darkLowerThres = 75 #lower threshold for darkness
 userID = "moonLite" #up to 8 char username to allow USNO to estimate unique users
+LDRPin = board.D18 #IO pin for light dependent resistor/cap sensor
 
 # script state variables
 errorLevel = 0
@@ -41,7 +46,7 @@ def rotl(num, bits):
 # returns 6 bit number. Leftmost is moon's leftmost slice when viewed from Northern hemisphere
 # upon error, returns 6 bit number corresponding to errorState
 def getLEDSequence():
-    #Rightmost 6 LEDs are visible. Start with new moon
+    # Rightmost 6 LEDs are visible. Start with new moon
     phases = 0b111111000000
     lunarmonth = datetime.timedelta(days=29, hours=12, minutes=44, seconds=3)
     curtime = datetime.datetime.now()
@@ -70,18 +75,39 @@ def getLEDSequence():
     print("Error. New moon not found")
     return errorState
 
-#returns true if dark, false if not
-def isDark():
-    thres = darkUpperThres if darkState else darkLowerThres
-    
-    return True
+# returns true if dark, false if not
+# based on code from Adafruit
+def isDark(pin):
+    thres = darkLowerThres if darkState else darkUpperThres
+     
+    while True:
+        with DigitalInOut(pin) as rc:
+            reading = 0
+     
+            # setup pin as output and direction low value
+            rc.direction = Direction.OUTPUT
+            rc.value = False
+     
+            time.sleep(0.1)
+     
+            # setup pin as input and wait for low value
+            rc.direction = Direction.INPUT
+     
+            # This takes about 1 millisecond per loop cycle
+            while rc.value is False:
+                reading += 1
+            if reading > thres:   
+                darkState = True
+            else:
+                darkState = False
+            return darkState
 
-#update the LEDS with the 6 bit seq
+# update the LEDS with the 6 bit seq
 def updateLEDs(seq):
     print("LED arrangement: "+format(seq, '06b'))
     return True
 
-#reset counter variables to initial condition
+# reset counter variables to initial condition
 def initializeVariables():
     errorLevel = 0
     lastActive = datetime.datetime.strptime("2000 1 1", "%Y %m %d")
@@ -94,8 +120,8 @@ def initializeVariables():
 initializeVariables()
 
 while True:
-    if isDark():
-        #update the data if there's an error or significant time has elapsed since data was fetched
+    if isDark(LDRPin):
+        # update the data if there's an error or significant time has elapsed since data was fetched
         if (leds == errorState and errorLevel < errorLimit) or datetime.datetime.now() - lastActive > updateDataTime:
             if datetime.datetime.now() - lastError > errorRetry:
                 leds = getLEDSequence()
@@ -109,7 +135,7 @@ while True:
                     errorLevel = 0
                 updateLEDs(leds)
     else:
-        #turn off the LEDs if it's bright and reset everything
+        # turn off the LEDs if it's bright and reset everything
         updateLEDs(0)
         initializeVariables()
         time.sleep(1)
