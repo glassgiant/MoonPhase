@@ -7,9 +7,9 @@ by Shawn Wilson and Ryan Wilson, May 2019
 import json
 import datetime
 import time
-import RPi.GPIO as GPIO
+#import RPi.GPIO as GPIO
 from urllib.request import urlopen
-from digitalio import DigitalInOut, Direction
+#from digitalio import DigitalInOut, Direction
 
 # user-adjustable variables
 errorState = 0b001100 #LED sequence to show if there's an error (an impossible sequence is best)
@@ -19,14 +19,18 @@ updateDataTime = datetime.timedelta(hours=24) #how often to check for phase chan
 darkUpperThres = 85 #upper threshold for darkness
 darkLowerThres = 75 #lower threshold for darkness
 userID = "moonLite" #up to 8 char username to allow USNO to estimate unique users
-LDRPin = board.D18 #IO pin for light dependent resistor/cap sensor
+#LDRPin = board.D18 #IO pin for light dependent resistor/cap sensor
+LDRPin = 1
+LEDPins = ((2,),(3,),(4,),(17,),(27,),(22,)) #Raspberry Pi LED Pins, one LED per section
+#LEDPins = ((2,3),(4,17),(27,22),(10,11),(12,5),(6,13)) #Raspberry Pi LED Pins, two LEDs per section
 
 # script state variables
 errorLevel = 0
 lastActive = datetime.datetime.strptime("2000 1 1", "%Y %m %d")
 lastError = datetime.datetime.strptime("2000 1 1", "%Y %m %d")
-leds = errorState
+LEDs = errorState
 darkState = True
+LEDPulse = 0
 
 
 #--------------------------------------------------------------------------------------
@@ -72,14 +76,14 @@ def getLEDSequence():
             print("Shifting LEDs left: "+str(numMove))
             return phases & 0b111111
         i+=1
-    print("Error. New moon not found")
+    print("Error. Next new moon data not found")
     return errorState
 
 # returns true if dark, false if not
 # based on code from Adafruit
 def isDark(pin):
     thres = darkLowerThres if darkState else darkUpperThres
-     
+    '''    
     while True:
         with DigitalInOut(pin) as rc:
             reading = 0
@@ -87,24 +91,45 @@ def isDark(pin):
             # setup pin as output and direction low value
             rc.direction = Direction.OUTPUT
             rc.value = False
-     
-            time.sleep(0.1)
+
+            for i in range(10):
+                updateLEDs(LEDs)
+                time.sleep(0.01)
      
             # setup pin as input and wait for low value
             rc.direction = Direction.INPUT
      
             # This takes about 1 millisecond per loop cycle
             while rc.value is False:
+                updateLEDs(LEDs)
                 reading += 1
             if reading > thres:   
                 darkState = True
             else:
-                darkState = False
-            return darkState
+                darkState = False'''
+    return darkState
 
 # update the LEDS with the 6 bit seq
 def updateLEDs(seq):
+    global LEDPulse
+    i=0
+    while i < len(LEDPins):
+        print (LEDPins[i])
+        j=0
+        while j < len(LEDPins[i]):
+            if seq>>i&1 and LEDPulse == i:
+                time.sleep(.01)
+                print (j)
+                #GPIO.output(LEDPins[i][j],GPIO.HIGH)
+            else:
+                time.sleep(.01)
+                print (j)
+                #GPIO.output(LEDPins[i][j],GPIO.LOW)
+            j+=1
+        i+=1
+    
     print("LED arrangement: "+format(seq, '06b'))
+    LEDPulse = (LEDPulse+1)%6
     return True
 
 # reset counter variables to initial condition
@@ -112,9 +137,8 @@ def initializeVariables():
     errorLevel = 0
     lastActive = datetime.datetime.strptime("2000 1 1", "%Y %m %d")
     lastError = datetime.datetime.strptime("2000 1 1", "%Y %m %d")
-    leds = errorState
+    LEDs = errorState
     return True
-
 
 #-------------------------------------------------------------
 initializeVariables()
@@ -122,18 +146,18 @@ initializeVariables()
 while True:
     if isDark(LDRPin):
         # update the data if there's an error or significant time has elapsed since data was fetched
-        if (leds == errorState and errorLevel < errorLimit) or datetime.datetime.now() - lastActive > updateDataTime:
+        if (LEDs == errorState and errorLevel < errorLimit) or datetime.datetime.now() - lastActive > updateDataTime:
             if datetime.datetime.now() - lastError > errorRetry:
-                leds = getLEDSequence()
+                LEDs = getLEDSequence()
                 lastActive = datetime.datetime.now()
-                if leds == errorState:
+                if LEDs == errorState:
                     lasterror = datetime.datetime.now()
                     errorLevel+=1
                     time.sleep(1)
                     next
                 else:
                     errorLevel = 0
-                updateLEDs(leds)
+                updateLEDs(LEDs)
     else:
         # turn off the LEDs if it's bright and reset everything
         updateLEDs(0)
